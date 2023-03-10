@@ -53,7 +53,7 @@ def get_args():
     parser.add_argument('--lr_ft', type=float, default=5e-3)
     parser.add_argument('--l2reg', type=float, default=5e-6)
     parser.add_argument('--val_frac', type=float, default=0.1, help='fraction of edges for validation set (and same number of no-edges)')
-    parser.add_argument('--test_frac', type=float, default=0.2, help='fraction of edges for testing set (and same number of no-edges)')
+    parser.add_argument('--test_frac', type=float, default=0.3, help='fraction of edges for testing set (and same number of no-edges)')
     parser.add_argument('--disc_func', type=str, default='lin', choices=['lin', 'kl', 'w'], help='distance function for discrepancy loss')
     parser.add_argument('--lr_scheduler', type=str, default='zigzag', choices=['sgdr', 'cos', 'zigzag', 'none'], help='lr scheduler')
     parser.add_argument('--cal_ate', action='store_true', help='whether to calculate observed and estimated ATE')
@@ -75,7 +75,7 @@ def train(args, logger):
         torch.manual_seed(args.seed)
         torch.cuda.manual_seed_all(args.seed)
     # load data
-    adj_label, features, dim_feat, adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = load_data(args, logger)
+    adj_label, features, dim_feat, adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = load_data_new(args, logger)
     # load n by n treatment matrix
     T_file_path = f'{args.datapath}T_files/'
     if not os.path.exists(T_file_path):

@@ -19,7 +19,9 @@ The step of finding all the counterfactual links can be slow for the first run, 
 Following are the commands to reproduce our experiment results on different datasets.
 ```
 # Cora
-python main.py --dataset cora --metric auc --alpha 1 --beta 1 --gamma 30 --lr 0.1 --embraw mvgrl --t kcore --neg_rate 50 --jk_mode mean --trail 20
+python main.py --dataset cora --metric auc --alpha 1 --beta 1 --gamma 30 --lr 0.1 --embraw mvgrl --t kcore --neg_rate 50 --jk_mode mean --trail 20 --gpu -2 --epochs 5 --epochs_ft 5
+python main.py --dataset Cora --metric auc --alpha 1 --beta 1 --gamma 30 --lr 0.1 --embraw mvgrl --t kcore --neg_rate 50 --jk_mode mean --trail 20 --gpu -2 --epochs 5 --epochs_ft 5
+python main.py --dataset PubMed --metric auc --alpha 1 --beta 1 --gamma 30 --lr 0.1 --embraw mvgrl --t kcore --neg_rate 50 --jk_mode mean --trail 20 --gpu -2 --epochs 5 --epochs_ft 5
 
 # CiteSeer
 python main.py --dataset citeseer --metric auc --alpha 1 --beta 1 --gamma 30 --lr=0.1 --embraw dgi --t kcore --neg_rate 50 --jk_mode mean --trail 20

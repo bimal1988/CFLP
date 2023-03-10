@@ -16,6 +16,17 @@ from dgl.data.citation_graph import CoraGraphDataset, CiteseerGraphDataset, Pubm
 
 from ogb.linkproppred import Evaluator, PygLinkPropPredDataset
 from ogb.linkproppred import DglLinkPropPredDataset
+from torch_geometric.datasets import Planetoid, AttributedGraphDataset
+from pathlib import Path
+import torch_geometric.transforms as T
+from torch_geometric.data import Data
+from torch_geometric.utils import to_dense_adj
+
+
+def edge_index_to_adj_matrix(edge_index, max_num_nodes):
+    adj_matrix = to_dense_adj(edge_index, max_num_nodes=max_num_nodes)[0]
+    adj_matrix = sp.csr_matrix(adj_matrix, dtype=int)
+    return adj_matrix
 
 
 def eval_ep_batched(logits, labels, n_pos):
@@ -34,6 +45,7 @@ def eval_ep_batched(logits, labels, n_pos):
         })[f'hits@{K}']
         results[f'hits@{K}'] = hits
     return results
+
 
 def eval_ep(A_pred, edges, edges_false):
     preds = A_pred[edges.T]
@@ -56,6 +68,7 @@ def eval_ep(A_pred, edges, edges_false):
         results[f'hits@{K}'] = hits
     return results
 
+
 def normalize_sp(adj_matrix):
     # normalize adj by D^{-1/2}AD^{-1/2} for scipy sparse matrix input
     degrees = np.array(adj_matrix.sum(1))
@@ -63,6 +76,7 @@ def normalize_sp(adj_matrix):
     degree_mat_inv_sqrt = np.nan_to_num(degree_mat_inv_sqrt)
     adj_norm = degree_mat_inv_sqrt @ adj_matrix @ degree_mat_inv_sqrt
     return adj_norm
+
 
 def load_data(args, logger):
     path = args.datapath
@@ -72,9 +86,9 @@ def load_data(args, logger):
         graph = dataset[0]
         adj_train = graph.adjacency_matrix(scipy_fmt='csr')
         g = nx.from_scipy_sparse_matrix(adj_train)
-        print('density',nx.density(g))
-        print('edges:', len(g.edges()) )
-        print('nodes:', len(g.nodes()) )
+        print('density', nx.density(g))
+        print('edges:', len(g.edges()))
+        print('nodes:', len(g.nodes()))
         adj_train.setdiag(1)
         if 'feat' in graph.ndata:
             features = graph.ndata['feat']
@@ -109,19 +123,23 @@ def load_data(args, logger):
             # node features: sp.lil_matrix
             features = pickle.load(open(f'{path}{ds}_feat.pkl', 'rb'))
             if isinstance(features, sp.lil.lil_matrix):
-                features= features.toarray()
+                features = features.toarray()
             features = torch.FloatTensor(features)
             dim_feat = features.shape[-1]
 
         elif args.dataset == 'facebook':
             filename = f'data/{args.dataset}.txt'
-            g = nx.read_edgelist(filename,create_using=nx.Graph(), nodetype = int,  data=(("weight", float),))
-            adj_label = nx.adjacency_matrix(g, nodelist = sorted(g.nodes()))
-            adj_label = (adj_label > 0).astype('int') # to binary
+            g = nx.read_edgelist(filename, create_using=nx.Graph(), nodetype=int, data=(("weight", float),))
+            adj_label = nx.adjacency_matrix(g, nodelist=sorted(g.nodes()))
+            adj_label = (adj_label > 0).astype('int')  # to binary
 
-        #load tvt_edges
+        # load tvt_edges
         tvt_edges_file = f'{args.datapath}{args.dataset}_tvtEdges_val{args.val_frac}test{args.test_frac}.pkl'
-        adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj_label, args.val_frac, args.test_frac, tvt_edges_file, logger)
+        adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj_label,
+                                                                                                           args.val_frac,
+                                                                                                           args.test_frac,
+                                                                                                           tvt_edges_file,
+                                                                                                           logger)
 
         if args.dataset == 'facebook':
             degrees = np.array(adj_train.sum(axis=1)).flatten().astype('int')
@@ -134,10 +152,96 @@ def load_data(args, logger):
     # print('dim feature, ', dim_feat)
     return adj_label, features, dim_feat, adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false
 
+
+def load_dataset(name: str, src: str = "pyg", cache_dir: str = "~/data"):
+    if src == "pyg" and name in ["Cora", "Citeseer", "PubMed"]:
+        dataset = Planetoid(
+            root=Path(cache_dir).as_posix(), name=name, transform=T.NormalizeFeatures()
+        )
+    elif src == "pyg" and name in ["Facebook"]:
+        dataset = AttributedGraphDataset(
+            root=Path(cache_dir).as_posix(), name=name, transform=T.NormalizeFeatures()
+        )
+    else:
+        raise ValueError(
+            f"Dataset: {name} from source: {src} is currently not supported."
+        )
+    return dataset
+
+
+def split_data(data: Data):
+    transform = T.RandomLinkSplit(
+        num_val=0.1,
+        num_test=0.3,
+        split_labels=True,
+        add_negative_train_samples=False,
+        neg_sampling_ratio=1.0,
+        is_undirected=True,
+    )
+    train_data, val_data, test_data = transform(data)
+    return train_data, val_data, test_data
+
+
+def load_data_new(args, logger):
+    val_frac = 0.1
+    test_frac = 0.3
+    path = args.datapath
+    ds = args.dataset
+    if ds in ['Cora', 'PubMed', "Facebook"]:
+        dataset = load_dataset(ds)
+        data = dataset[0]
+        train_data, val_data, test_data = split_data(data)
+        tvt_edges_file = f'{args.datapath}{args.dataset}_tvtEdges_val{val_frac}test{test_frac}.pkl'
+        emb_file = f'{args.datapath}{args.dataset}_embs-raw{args.embraw}.pkl'
+        if not os.path.exists(emb_file):
+            pickle.dump(data.x, open(emb_file, 'wb'))
+        (adj_train,
+         train_pairs,
+         val_edges,
+         val_edges_false,
+         test_edges,
+         test_edges_false) = mask_test_edges_new(train_data,
+                                                 val_data,
+                                                 test_data,
+                                                 tvt_edges_file,
+                                                 logger)
+
+        adj_label = edge_index_to_adj_matrix(data.edge_index, data.x.shape[0])
+        features = data.x
+        dim_feat = data.x.shape[1]
+        return (adj_label, features, dim_feat, adj_train, train_pairs,
+                val_edges, val_edges_false, test_edges, test_edges_false)
+
+
+def mask_test_edges_new(train_data, val_data, test_data, filename, logger):
+    adj_train = edge_index_to_adj_matrix(train_data.edge_index, train_data.x.shape[0])
+    val_edges = val_data.pos_edge_label_index.numpy().T
+    val_edges_false = val_data.neg_edge_label_index.numpy().T
+    test_edges = test_data.pos_edge_label_index.numpy().T
+    test_edges_false = test_data.neg_edge_label_index.numpy().T
+    adj_train.setdiag(1)
+
+    # get training node pairs (edges and no-edges)
+    train_mask = np.ones(adj_train.shape)
+    for edges_tmp in [val_edges, val_edges_false, test_edges, test_edges_false]:
+        # for e in edges_tmp:
+        #     assert e[0] < e[1]
+        train_mask[edges_tmp.T[0], edges_tmp.T[1]] = 0
+        train_mask[edges_tmp.T[1], edges_tmp.T[0]] = 0
+
+    train_pairs = np.asarray(sp.triu(train_mask, 1).nonzero()).T
+    # cache files for future use
+    pickle.dump((adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false),
+                open(filename, 'wb'))
+
+    return adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false
+
+
 def mask_test_edges(adj_orig, val_frac, test_frac, filename, logger):
     # NOTE: Splits are randomized and results might slightly deviate from reported numbers in the paper.
     if os.path.exists(filename):
-        adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = pickle.load(open(filename, 'rb'))
+        adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false = pickle.load(
+            open(filename, 'rb'))
         logger.info(f'loaded cached val and test edges with fracs of {val_frac} and {test_frac}')
         return adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false
 
@@ -213,9 +317,11 @@ def mask_test_edges(adj_orig, val_frac, test_frac, filename, logger):
         val_edges_false.append([idx_i, idx_j])
     val_edges_false = np.asarray(val_edges_false).astype("int32")
     """
+
     def ismember(a, b, tol=5):
         rows_close = np.all(np.round(a - b[:, None], tol) == 0, axis=-1)
         return np.any(rows_close)
+
     assert ~ismember(test_edges_false, edges_all)
     assert ~ismember(val_edges_false, edges_all)
     assert ~ismember(val_edges, train_edges)
@@ -237,13 +343,14 @@ def mask_test_edges(adj_orig, val_frac, test_frac, filename, logger):
         train_mask[edges_tmp.T[0], edges_tmp.T[1]] = 0
         train_mask[edges_tmp.T[1], edges_tmp.T[0]] = 0
     train_pairs = np.asarray(sp.triu(train_mask, 1).nonzero()).T
-
     # cache files for future use
-    pickle.dump((adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false), open(filename, 'wb'))
+    pickle.dump((adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false),
+                open(filename, 'wb'))
     logger.info(f'masked and cached val and test edges with fracs of {val_frac} and {test_frac}')
 
     # NOTE: all these edge lists only contain single direction of edge!
     return adj_train, train_pairs, val_edges, val_edges_false, test_edges, test_edges_false
+
 
 def cache_dataset(dataset):
     # download and cache Cora/CiteSeer/PubMed datasets
@@ -256,6 +363,7 @@ def cache_dataset(dataset):
             return PubmedGraphDataset()
         else:
             raise TypeError('unsupported dataset.')
+
     ds = download_dataset(dataset)
     adj = nx.to_scipy_sparse_matrix(ds._graph)
     feats = ds._g.ndata['feat']
@@ -271,7 +379,9 @@ def cache_dataset(dataset):
     pickle.dump(feats, open(f'data/{dataset}_feat.pkl', 'wb'))
     pickle.dump(labels, open(f'data/{dataset}_label.pkl', 'wb'))
     pickle.dump((idx_train, idx_val, idx_test), open(f'data/{dataset}_tvt-idx.pkl', 'wb'))
-    print(adj.shape, (adj.nnz-adj.shape[0])/2, feats.shape, len(np.unique(labels)), len(idx_train), len(idx_val), len(idx_test))
+    print(adj.shape, (adj.nnz - adj.shape[0]) / 2, feats.shape, len(np.unique(labels)), len(idx_train), len(idx_val),
+          len(idx_test))
+
 
 def sparse_to_tuple(sparse_mx):
     if not sp.isspmatrix_coo(sparse_mx):
@@ -281,8 +391,10 @@ def sparse_to_tuple(sparse_mx):
     shape = sparse_mx.shape
     return coords, values, shape
 
+
 class MultipleOptimizer():
     """ a class that wraps multiple optimizers """
+
     def __init__(self, lr_scheduler, *op):
         self.optimizers = op
         self.steps = 0
@@ -306,17 +418,18 @@ class MultipleOptimizer():
     def step(self):
         for op in self.optimizers:
             op.step()
+
     def no_update(self, base_lr):
         return base_lr
 
     def update_lr_SGDR(self, base_lr):
-        end_lr = 1e-3 # 0.001
+        end_lr = 1e-3  # 0.001
         total_T = self.total_epoch + 1
         if total_T >= self.next_start_step:
             self.steps = 0
             self.next_start_step *= self.multi_factor
         cur_T = self.steps + 1
-        lr = end_lr + 1/2 * (base_lr - end_lr) * (1.0 + math.cos(math.pi*cur_T/total_T))
+        lr = end_lr + 1 / 2 * (base_lr - end_lr) * (1.0 + math.cos(math.pi * cur_T / total_T))
         for optimizer in self.optimizers:
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
@@ -329,8 +442,8 @@ class MultipleOptimizer():
         annealing_steps = 20
         end_lr = 1e-4
         if self.steps < warmup_steps:
-            lr = base_lr * (self.steps+1) / warmup_steps
-        elif self.steps < warmup_steps+annealing_steps:
+            lr = base_lr * (self.steps + 1) / warmup_steps
+        elif self.steps < warmup_steps + annealing_steps:
             step = self.steps - warmup_steps
             q = (annealing_steps - step) / annealing_steps
             lr = base_lr * q + end_lr * (1 - q)
@@ -350,8 +463,8 @@ class MultipleOptimizer():
         annealing_steps = 500
         end_lr = 1e-3
         if self.steps < warmup_steps:
-            lr = base_lr * (self.steps+1) / warmup_steps
-        elif self.steps < warmup_steps+annealing_steps:
+            lr = base_lr * (self.steps + 1) / warmup_steps
+        elif self.steps < warmup_steps + annealing_steps:
             step = self.steps - warmup_steps
             q = 0.5 * (1 + math.cos(math.pi * step / annealing_steps))
             lr = base_lr * q + end_lr * (1 - q)
@@ -364,6 +477,7 @@ class MultipleOptimizer():
                 param_group['lr'] = lr
         self.steps += 1
         return lr
+
 
 def get_logger(name):
     """ create a nice logger """
@@ -387,6 +501,7 @@ def get_logger(name):
         logger.addHandler(fh)
     return logger
 
+
 def scipysp_to_pytorchsp(sp_mx):
     """ converts scipy sparse matrix to pytorch sparse matrix """
     if not sp.isspmatrix_coo(sp_mx):
@@ -399,3 +514,8 @@ def scipysp_to_pytorchsp(sp_mx):
                                          torch.Size(shape))
     return pyt_sp_mx
 
+
+if __name__ == '__main__':
+    from types import SimpleNamespace
+    a = load_data_new(SimpleNamespace(datapath="", dataset="Cora"), None)
+    print(a)
