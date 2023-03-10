@@ -1,8 +1,11 @@
 *__pycache__/
 .vscode/
+.idea/
 .DS_Store
 *.py[cod]
 *$py.class
+.python-version
+venv/
 
 logs/
 data/train_split/

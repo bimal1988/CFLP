@@ -13,7 +13,7 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.sparse.linalg import inv, eigs
 import networkx as nx
 from sknetwork.embedding import Spectral
-from sknetwork.utils import membership_matrix
+from sknetwork.utils import get_membership
 from sknetwork.hierarchy import Ward, cut_straight
 from sknetwork.clustering import Louvain, KMeans, PropagationClustering
 from geomloss import SamplesLoss
@@ -64,11 +64,11 @@ def get_t(adj_mat, method, k, selfloop=False):
     return T
 
 def SBM(adj, k):
-    nx_g = nx.from_scipy_sparse_matrix(adj)
+    nx_g = nx.from_scipy_sparse_array(adj)
     standard_partition = pysbm.NxPartition(graph=nx_g, number_of_blocks=k)
     rep = standard_partition.get_representation()
     labels = np.asarray([v for k, v in sorted(rep.items(), key=lambda item: item[0])])
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
@@ -76,7 +76,7 @@ def ward_hierarchy(adj, k):
     ward = Ward()
     dendrogram = ward.fit_transform(adj)
     labels = cut_straight(dendrogram, k)
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
@@ -126,29 +126,29 @@ def common_neighbors(adj, k):
 def louvain(adj):
     louvain = Louvain()
     labels = louvain.fit_transform(adj)
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
 def propagation(adj):
     propagation = PropagationClustering()
     labels = propagation.fit_transform(adj)
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
 def spectral_clustering(adj, k):
     kmeans = KMeans(n_clusters = k, embedding_method=Spectral(256))
     labels = kmeans.fit_transform(adj)
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
 def kcore(adj):
-    G = nx.from_scipy_sparse_matrix(adj)
+    G = nx.from_scipy_sparse_array(adj)
     G.remove_edges_from(nx.selfloop_edges(G))
     labels = np.array(list(nx.algorithms.core.core_number(G).values()))-1
-    mem_mat = membership_matrix(labels)
+    mem_mat = get_membership(labels)
     T = (mem_mat @ mem_mat.T).astype(int)
     return T
 
