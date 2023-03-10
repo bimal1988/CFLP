@@ -1,0 +1,10 @@
+-f https://pytorch-geometric.com/whl/torch-1.12.1+cu116.html
+torch-geometric
+torch-sparse
+torch-scatter
+torch-cluster
+torch-spline-conv
+scikit-network
+geomloss
+dgl
+ogb
